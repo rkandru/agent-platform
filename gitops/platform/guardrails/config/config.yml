@@ -1,0 +1,28 @@
+# NeMo Guardrails config_id: agent-platform  (pin server 0.24.x; VERIFY keys on upgrade)
+models:
+  - type: main
+    engine: openai
+    model: guardrail-judge
+    parameters:
+      base_url: http://litellm.litellm.svc.cluster.local:4000/v1   # judge model via LiteLLM (D34)
+
+rails:
+  config:
+    jailbreak_detection:
+      length_per_perplexity_threshold: 89.79
+      prefix_suffix_perplexity_threshold: 1845.65
+    sensitive_data_detection:
+      input:
+        entities: [EMAIL_ADDRESS, PHONE_NUMBER, CREDIT_CARD, US_SSN, IBAN_CODE]
+      output:
+        entities: [EMAIL_ADDRESS, PHONE_NUMBER, CREDIT_CARD, US_SSN, IBAN_CODE]
+  input:
+    flows:
+      - jailbreak detection heuristics
+      - mask sensitive data on input
+  output:
+    flows:
+      - mask sensitive data on output
+  # Phase 2 (after LiteLLM judge is approved):
+  #   - self check input
+  #   - self check output

@@ -1,0 +1,37 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: restrict-model-and-tool-endpoints
+  annotations:
+    policies.kyverno.io/description: Model and MCP traffic must go through agw-egress (D5, D13, D30).
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: modelconfig-through-gateway
+      match:
+        any:
+          - resources: { kinds: [kagent.dev/v1alpha2/ModelConfig] }
+      validate:
+        message: "ModelConfig must use provider OpenAI with openAI.baseUrl on agw-egress /llm, and no apiKeyPassthrough."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.object.spec.provider }}"
+                operator: NotEquals
+                value: OpenAI
+              - key: "{{ request.object.spec.openAI.baseUrl || '' }}"
+                operator: AnyNotIn
+                value: ["http://agw-egress.agentgateway-system.svc.cluster.local:8080/llm/*"]
+              - key: "{{ request.object.spec.apiKeyPassthrough || `false` }}"
+                operator: Equals
+                value: true
+    - name: remotemcpserver-through-gateway
+      match:
+        any:
+          - resources: { kinds: [kagent.dev/v1alpha2/RemoteMCPServer] }
+      validate:
+        message: "RemoteMCPServer url must point at agw-egress /mcp/*."
+        pattern:
+          spec:
+            url: "http://agw-egress.agentgateway-system.svc.cluster.local:8080/mcp/*"

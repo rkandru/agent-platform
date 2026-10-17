@@ -1,0 +1,19 @@
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata: { name: via-gateway, namespace: team-payments }
+spec:
+  provider: OpenAI
+  model: default-chat
+  apiKeySecret: llm-placeholder
+  apiKeySecretKey: key
+  openAI: { baseUrl: "http://agw-egress.agentgateway-system.svc.cluster.local:8080/llm/v1" }
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata: { name: direct-to-provider, namespace: team-payments }
+spec:
+  provider: OpenAI
+  model: gpt-5
+  apiKeySecret: openai
+  apiKeySecretKey: key
+  openAI: { baseUrl: "https://api.openai.com/v1" }

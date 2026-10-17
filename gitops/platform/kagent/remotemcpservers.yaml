@@ -1,0 +1,30 @@
+# Every RemoteMCPServer points at agw-egress, never at the tool server directly (D13; Kyverno enforces).
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: mcp-grafana
+  namespace: kagent
+  labels: { platform.example.com/risk-tier: T0 }
+spec:
+  description: Grafana LGTM (read-only) via agentgateway
+  protocol: STREAMABLE_HTTP
+  url: http://agw-egress.agentgateway-system.svc.cluster.local:8080/mcp/grafana
+  allowedNamespaces:
+    from: Selector
+    selector:
+      matchLabels: { platform.example.com/agent-namespace: "true" }
+---
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata:
+  name: mcp-atlassian
+  namespace: kagent
+  labels: { platform.example.com/risk-tier: T1 }
+spec:
+  description: Atlassian Rovo MCP (Jira/Confluence) via agentgateway; user's vendor token injected by the gateway
+  protocol: STREAMABLE_HTTP
+  url: http://agw-egress.agentgateway-system.svc.cluster.local:8080/mcp/atlassian
+  allowedNamespaces:
+    from: Selector
+    selector:
+      matchLabels: { platform.example.com/agent-namespace: "true" }

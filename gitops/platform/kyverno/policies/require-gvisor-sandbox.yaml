@@ -1,0 +1,21 @@
+# Coding pilot cluster (kagent 1.x): every pod in a sandbox namespace runs under gVisor (D18).
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-gvisor-sandbox
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: runtimeclass-gvisor
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaceSelector:
+                matchLabels: { platform.example.com/sandbox: "true" }
+      validate:
+        message: "Sandbox pods must set runtimeClassName: gvisor."
+        pattern:
+          spec:
+            runtimeClassName: gvisor

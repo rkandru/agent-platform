@@ -1,0 +1,19 @@
+# App-of-apps. Bootstrap once with: kubectl apply -n argocd -f gitops/argocd/root-app.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-platform-root
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/example-org/agent-platform.git   # TODO(repo): real URL
+    targetRevision: main
+    path: gitops/argocd
+    directory:
+      exclude: root-app.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }

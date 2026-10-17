@@ -1,0 +1,37 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-agent-metadata
+  annotations:
+    policies.kyverno.io/description: Every Agent declares owner, audience, risk tier, tool allowlist and data classes (D6, D25, D40).
+spec:
+  validationFailureAction: Enforce
+  background: true
+  rules:
+    - name: required-labels-and-annotations
+      match:
+        any:
+          - resources: { kinds: [kagent.dev/v1alpha2/Agent] }
+      validate:
+        message: "Agents need labels platform.example.com/{owner,audience,risk-tier} and annotations platform.example.com/{tools,data-classes}."
+        pattern:
+          metadata:
+            labels:
+              platform.example.com/owner: "?*"
+              platform.example.com/audience: "?*"
+              platform.example.com/risk-tier: "T0 | T1 | T2"
+            annotations:
+              platform.example.com/tools: "?*"
+              platform.example.com/data-classes: "?*"
+    - name: agents-only-in-team-namespaces
+      match:
+        any:
+          - resources: { kinds: [kagent.dev/v1alpha2/Agent] }
+      validate:
+        message: "Agents may only be created in team-* namespaces."
+        deny:
+          conditions:
+            any:
+              - key: "{{ request.namespace }}"
+                operator: AnyNotIn
+                value: ["team-*"]

@@ -1,0 +1,35 @@
+# One namespace + Application per team folder (team folder name == AD group name, D41).
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: agent-teams
+  namespace: argocd
+spec:
+  goTemplate: true
+  generators:
+    - git:
+        repoURL: https://github.com/example-org/agent-platform.git   # TODO(repo)
+        revision: main
+        directories:
+          - path: gitops/teams/*
+          - path: gitops/teams/_template
+            exclude: true
+  template:
+    metadata:
+      name: 'team-{{ .path.basename }}'
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/example-org/agent-platform.git
+        targetRevision: main
+        path: '{{ .path.path }}/agents'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: 'team-{{ .path.basename }}'
+      syncPolicy:
+        automated: { prune: true, selfHeal: true }
+        syncOptions: [CreateNamespace=true]
+        managedNamespaceMetadata:
+          labels:
+            platform.example.com/agent-namespace: "true"   # selects Cilium default-deny + Kyverno rules
+            platform.example.com/team: '{{ .path.basename }}'

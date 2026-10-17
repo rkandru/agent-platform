@@ -1,0 +1,31 @@
+# LiteLLM proxy (D30, D23, D36). Only agw-egress may reach it (NetworkPolicy in this folder).
+model_list:
+  - model_name: default-chat
+    litellm_params:
+      model: anthropic/claude-sonnet-5-5          # TODO(models): your approved defaults
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: guardrail-judge                    # phase-2 LLM judge for NeMo self-check rails (D34)
+    litellm_params:
+      model: anthropic/claude-haiku-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: codex-default
+    litellm_params:
+      model: openai/gpt-5-codex                    # TODO(models)
+      api_key: os.environ/OPENAI_API_KEY
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  database_url: os.environ/DATABASE_URL
+  # agw-egress sets x-agent-id from the calling pod's workload identity; LiteLLM tracks end-user spend/budgets by it.
+  user_header_name: x-agent-id                     # VERIFY on your LiteLLM version (end-user id from header)
+
+litellm_settings:
+  callbacks: ["otel"]                              # traces -> OTel Collector (OTEL_EXPORTER_OTLP_ENDPOINT env)
+  turn_off_message_logging: true                   # metadata-only by default (D9)
+
+guardrails:
+  - guardrail_name: nemo-checks
+    litellm_params:
+      guardrail: nemo_guardrail.NemoChecks         # custom guardrail class in nemo_guardrail.py (mounted next to config)
+      mode: [pre_call, post_call]
+      default_on: true

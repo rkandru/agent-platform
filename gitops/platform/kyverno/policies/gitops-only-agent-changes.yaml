@@ -1,0 +1,24 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: gitops-only-agent-changes
+  annotations:
+    policies.kyverno.io/description: Agents, ModelConfigs and RemoteMCPServers change only through Argo CD (D6). No click-ops in the kagent UI.
+spec:
+  validationFailureAction: Enforce
+  background: false
+  rules:
+    - name: only-argocd-writes
+      match:
+        any:
+          - resources:
+              kinds: [kagent.dev/v1alpha2/Agent, kagent.dev/v1alpha2/ModelConfig, kagent.dev/v1alpha2/RemoteMCPServer]
+              operations: [CREATE, UPDATE, DELETE]
+      exclude:
+        any:
+          - subjects:
+              - { kind: ServiceAccount, name: argocd-application-controller, namespace: argocd }
+          - clusterRoles: [cluster-admin]          # break-glass, audited
+      validate:
+        message: "Change agents through a PR to the agent-platform repo; direct writes are blocked."
+        deny: {}

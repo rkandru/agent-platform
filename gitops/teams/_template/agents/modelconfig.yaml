@@ -1,0 +1,21 @@
+# All model traffic goes agent -> agw-egress -> LiteLLM (D30). The key below is a placeholder: the gateway strips it
+# and injects its own LiteLLM credential, attributing spend via x-agent-id. Kyverno rejects any other baseUrl.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-placeholder
+type: Opaque
+stringData:
+  key: "not-a-real-key-gateway-injects"
+---
+apiVersion: kagent.dev/v1alpha2
+kind: ModelConfig
+metadata:
+  name: litellm-default
+spec:
+  provider: OpenAI
+  model: default-chat                 # LiteLLM model_name alias, see gitops/platform/litellm/config.yaml
+  apiKeySecret: llm-placeholder
+  apiKeySecretKey: key
+  openAI:
+    baseUrl: http://agw-egress.agentgateway-system.svc.cluster.local:8080/llm/v1

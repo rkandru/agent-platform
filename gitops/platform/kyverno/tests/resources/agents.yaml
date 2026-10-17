@@ -1,0 +1,24 @@
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: good-agent
+  namespace: team-payments
+  labels:
+    platform.example.com/owner: payments-eng
+    platform.example.com/audience: payments-eng
+    platform.example.com/risk-tier: T1
+  annotations:
+    platform.example.com/tools: '{"mcp-grafana": ["query_loki_logs"]}'
+    platform.example.com/data-classes: internal
+spec:
+  type: Declarative
+  declarative: { modelConfig: litellm-default, systemMessage: "test" }
+---
+apiVersion: kagent.dev/v1alpha2
+kind: Agent
+metadata:
+  name: unlabelled-agent
+  namespace: team-payments
+spec:
+  type: Declarative
+  declarative: { modelConfig: litellm-default, systemMessage: "test" }

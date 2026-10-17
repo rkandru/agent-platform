@@ -1,0 +1,13 @@
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata: { name: mcp-via-gateway, namespace: kagent }
+spec:
+  protocol: STREAMABLE_HTTP
+  url: "http://agw-egress.agentgateway-system.svc.cluster.local:8080/mcp/grafana"
+---
+apiVersion: kagent.dev/v1alpha2
+kind: RemoteMCPServer
+metadata: { name: mcp-direct, namespace: kagent }
+spec:
+  protocol: STREAMABLE_HTTP
+  url: "http://grafana-mcp.mcp-servers.svc.cluster.local:8000/mcp"

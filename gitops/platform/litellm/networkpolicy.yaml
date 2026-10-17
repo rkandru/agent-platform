@@ -1,0 +1,17 @@
+# Agents cannot call LiteLLM directly (acceptance test 3); only the egress gateway and the coding pilot's egress may.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: litellm-ingress
+  namespace: litellm
+spec:
+  podSelector: {}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: agentgateway-system }
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: agent-platform }   # intake mints per-task keys (admin API)
+      ports:
+        - { protocol: TCP, port: 4000 }

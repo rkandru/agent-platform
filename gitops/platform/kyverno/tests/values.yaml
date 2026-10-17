@@ -1,0 +1,5 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Values
+namespaces:
+  - name: coding-tasks
+    labels: { platform.example.com/sandbox: "true" }

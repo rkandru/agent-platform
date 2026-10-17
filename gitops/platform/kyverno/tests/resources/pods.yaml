@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata: { name: sandboxed, namespace: coding-tasks }
+spec:
+  runtimeClassName: gvisor
+  containers: [{ name: harness, image: "artifactory.example.com/agent-harness/claude-code:2.1" }]
+---
+apiVersion: v1
+kind: Pod
+metadata: { name: unsandboxed, namespace: coding-tasks }
+spec:
+  containers: [{ name: harness, image: "artifactory.example.com/agent-harness/claude-code:2.1" }]

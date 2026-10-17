@@ -1,0 +1,26 @@
+# Example CI (GitHub Actions on a self-hosted runner inside the cluster network). Copy to .github/workflows/.
+name: agent-platform-ci
+on:
+  pull_request:
+  schedule: [{ cron: "0 3 * * 1" }]   # weekly garak
+jobs:
+  policies:
+    runs-on: [self-hosted, agent-platform]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Render gateway + Keycloak policies from Agent CRs
+        run: |
+          pip install pyyaml && python3 tools/agents_to_json.py gitops/teams > /tmp/agents.json
+          python3 tools/render_agent_policies.py < /tmp/agents.json
+          git diff --exit-code gitops/platform/agentgateway/generated gitops/platform/keycloak/generated
+      - name: Kyverno policy tests
+        run: kyverno test gitops/platform/kyverno/tests
+      - name: Schema validation
+        run: kubeconform -strict -summary -schema-location default -schema-location 'crds/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' gitops/
+  redteam:
+    if: github.event_name == 'schedule'
+    runs-on: [self-hosted, agent-platform]
+    steps:
+      - uses: actions/checkout@v5
+      - run: pip install "garak>=0.17,<0.18" && python -m garak --config ci/garak/garak-config.yaml
+        env: { LITELLM_REDTEAM_KEY: "${{ secrets.LITELLM_REDTEAM_KEY }}" }

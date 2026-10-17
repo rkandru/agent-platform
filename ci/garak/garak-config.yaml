@@ -1,0 +1,12 @@
+# garak run config (VERIFY keys against your pinned garak version)
+plugins:
+  model_type: openai.OpenAICompatible
+  model_name: default-chat
+  generators:
+    openai:
+      OpenAICompatible:
+        uri: http://litellm.litellm.svc.cluster.local:4000/v1
+        api_key: ${LITELLM_REDTEAM_KEY}        # dedicated key with its own budget
+  probe_spec: promptinject,dan,latentinjection,leakreplay,encoding,malwaregen,xss
+reporting:
+  report_prefix: agent-platform-weekly

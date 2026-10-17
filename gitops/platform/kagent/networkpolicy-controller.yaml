@@ -1,0 +1,20 @@
+# Phase 0 fix: only agw-inbound/agw-egress and the kagent UI may reach the controller API/A2A port (D25).
+# TODO(labels): confirm pod labels on your release with `kubectl -n kagent get pods --show-labels`.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kagent-controller-ingress
+  namespace: kagent
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: controller
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: agentgateway-system }
+        - podSelector:
+            matchLabels: { app.kubernetes.io/component: ui }
+      ports:
+        - { protocol: TCP, port: 8083 }

@@ -1,0 +1,107 @@
+# Upstreams reachable from agents — only through agw-egress (D5).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: litellm-gateway-key
+  namespace: agentgateway-system
+  annotations:
+    note: "Synced from Vault by External Secrets in production; never committed with a value."
+type: Opaque
+stringData:
+  Authorization: "Bearer REPLACED_BY_EXTERNAL_SECRETS"   # TODO(vault): ExternalSecret -> secret/agent-platform/litellm-gateway-key
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: litellm
+  namespace: agentgateway-system
+spec:
+  static:
+    host: litellm.litellm.svc.cluster.local
+    port: 4000
+  policies:
+    auth:
+      secretRef: { name: litellm-gateway-key }     # one gateway key; per-agent attribution via x-agent-id (D30)
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: mcp-grafana
+  namespace: agentgateway-system
+spec:
+  mcp:
+    targets:
+      - name: grafana
+        static:
+          host: grafana-mcp.mcp-servers.svc.cluster.local   # existing Grafana MCP; its SA token stays server-side (Vault)
+          port: 8000
+          path: /mcp
+          protocol: StreamableHTTP
+---
+# Vendor-hosted MCP with gateway-side token custody (D42, D45).
+# The broker's RFC 8693 endpoint returns the *user's* Atlassian access token for jwt.sub; the gateway
+# overwrites Authorization, so neither the Keycloak token reaches Atlassian nor the vendor token reaches the agent.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: credential-broker
+  namespace: agentgateway-system
+spec:
+  static:
+    host: credential-broker.agent-platform.svc.cluster.local
+    port: 8080
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: broker-client
+  namespace: agentgateway-system
+type: Opaque
+stringData:
+  clientSecret: "REPLACED_BY_EXTERNAL_SECRETS"   # TODO(vault): gateway's client credential at the broker
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: mcp-atlassian
+  namespace: agentgateway-system
+spec:
+  mcp:
+    targets:
+      - name: atlassian
+        static:
+          host: mcp.atlassian.com
+          port: 443
+          path: /v2/mcp
+          protocol: StreamableHTTP
+          policies:
+            tls:
+              sni: mcp.atlassian.com
+            auth:
+              oauthTokenExchange:
+                backendRef: { group: agentgateway.dev, kind: AgentgatewayBackend, name: credential-broker }
+                path: /oauth/token
+                grantType: TokenExchange
+                subjectToken:
+                  source:
+                    header: { name: Authorization, prefix: "Bearer " }
+                  tokenType: AccessToken
+                audiences: ["https://mcp.atlassian.com/v2/mcp"]
+                resources: ["https://mcp.atlassian.com/v2/mcp"]
+                requestedTokenType: AccessToken
+                clientAuth:
+                  clientId: agentgateway
+                  secretRef: { name: broker-client }
+                  method: ClientSecretBasic
+                cache:
+                  inMemory: { maxEntries: 4096, defaultTtl: 240s }   # keep <= vendor token expiry
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: kagent-a2a
+  namespace: agentgateway-system
+spec:
+  a2a:
+    host: kagent-controller.kagent.svc.cluster.local
+    port: 8083

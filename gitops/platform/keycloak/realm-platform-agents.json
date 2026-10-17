@@ -1,0 +1,106 @@
+{
+  "realm": "platform",
+  "identityProviders": [
+    {
+      "alias": "k8s-prod",
+      "providerId": "kubernetes",
+      "enabled": true,
+      "config": { "issuer": "https://kubernetes.default.svc.cluster.local" }
+    },
+    {
+      "alias": "k8s-coding-pilot",
+      "providerId": "kubernetes",
+      "enabled": true,
+      "config": { "issuer": "https://oidc.coding-pilot.example.com" }
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "mcp-grafana",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" },
+      "protocolMappers": [
+        { "name": "aud-mcp-grafana", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "mcp-grafana", "access.token.claim": "true" } }
+      ]
+    },
+    {
+      "name": "mcp-github",
+      "protocol": "openid-connect",
+      "attributes": { "include.in.token.scope": "true" },
+      "protocolMappers": [
+        { "name": "aud-mcp-github", "protocol": "openid-connect", "protocolMapper": "oidc-audience-mapper",
+          "config": { "included.custom.audience": "mcp-github", "access.token.claim": "true" } }
+      ]
+    },
+    {
+      "name": "groups",
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        { "name": "groups", "protocol": "openid-connect", "protocolMapper": "oidc-group-membership-mapper",
+          "config": { "claim.name": "groups", "full.path": "false", "access.token.claim": "true", "id.token.claim": "false" } }
+      ]
+    }
+  ],
+  "clientProfiles": {
+    "profiles": [
+      {
+        "name": "agent-downscope",
+        "description": "Token exchange may only narrow scopes (D3 intersection rule)",
+        "executors": [ { "executor": "downscope-assertion-grant-enforcer", "configuration": {} } ]
+      }
+    ]
+  },
+  "clientPolicies": {
+    "policies": [
+      {
+        "name": "agents-downscope-only",
+        "enabled": true,
+        "conditions": [
+          { "condition": "grant-type", "configuration": { "type": ["urn:ietf:params:oauth:grant-type:token-exchange"] } }
+        ],
+        "profiles": ["agent-downscope"]
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "kagent",
+      "name": "kagent UI + A2A (audience for inbound agentgateway)",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "redirectUris": ["https://agents.example.com/oauth2/callback"],
+      "defaultClientScopes": ["groups", "profile", "email"],
+      "attributes": { "standard.token.exchange.enabled": "true" }
+    },
+    {
+      "clientId": "credential-broker",
+      "name": "Credential broker (D12, D45)",
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": true,
+      "redirectUris": ["https://connect.example.com/callback/keycloak"],
+      "clientAuthenticatorType": "federated-jwt",
+      "attributes": {
+        "jwt.credential.issuer": "k8s-prod",
+        "jwt.credential.sub": "system:serviceaccount:agent-platform:credential-broker",
+        "standard.token.exchange.enabled": "true"
+      },
+      "fullScopeAllowed": false,
+      "optionalClientScopes": ["mcp-grafana", "mcp-github"]
+    },
+    {
+      "clientId": "agent-intake",
+      "name": "Intake service (Slack / GitHub / Jira)",
+      "publicClient": false,
+      "serviceAccountsEnabled": true,
+      "standardFlowEnabled": false,
+      "clientAuthenticatorType": "federated-jwt",
+      "attributes": {
+        "jwt.credential.issuer": "k8s-prod",
+        "jwt.credential.sub": "system:serviceaccount:agent-platform:intake"
+      },
+      "fullScopeAllowed": false
+    }
+  ]
+}

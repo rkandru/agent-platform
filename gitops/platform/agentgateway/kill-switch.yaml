@@ -1,0 +1,34 @@
+# Kill switches (D39). Runbook: docs/runbooks/kill-switch.md
+# Both policies target the egress gateway, so they stop LLM, MCP and A2A calls alike.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: kill-switch-agents
+  namespace: agentgateway-system
+  labels: { platform.example.com/break-glass: "true" }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: agw-egress }]
+  traffic:
+    phase: PreRouting
+    authorization:
+      action: Deny
+      policy:
+        matchExpressions:
+          # Add one line per denied agent: '<namespace>/<serviceaccount>'.
+          - 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount in ["__none__/__none__"]'
+---
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: kill-switch-global-freeze
+  namespace: agentgateway-system
+  labels: { platform.example.com/break-glass: "true" }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: agw-egress }]
+  traffic:
+    phase: PreRouting
+    authorization:
+      action: Deny
+      policy:
+        matchExpressions:
+          - "false"   # set to "true" to freeze every agent

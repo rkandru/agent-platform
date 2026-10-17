@@ -1,0 +1,94 @@
+# OpenTelemetry Collector (contrib) — D9, D19, D32.
+#  - ops tenant:     everything, with gen_ai content + tool args/results stripped
+#  - content tenant: unredacted spans, ONLY for agents annotated platform.example.com/capture-content=true (30d)
+#  - audit:          gateway access logs + approval/intake/broker events -> Loki tenant "audit" (13 months)
+#                    AND an S3 bucket with Object Lock (compliance mode, 13 months) as the WORM copy.
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: "0.0.0.0:4317" }
+      http: { endpoint: "0.0.0.0:4318" }
+
+processors:
+  memory_limiter: { check_interval: 1s, limit_percentage: 80, spike_limit_percentage: 20 }
+  batch: {}
+  k8sattributes:
+    extract:
+      annotations:
+        - tag_name: capture_content
+          key: platform.example.com/capture-content
+          from: pod
+      labels:
+        - tag_name: agent_team
+          key: platform.example.com/team
+          from: namespace
+  transform/redact:
+    error_mode: ignore
+    trace_statements:
+      - context: span
+        statements:
+          # kagent always records tool args/results; GenAI semconv content attributes are stripped too.
+          - delete_matching_keys(attributes, "^gen_ai\\.(prompt|completion|input\\.messages|output\\.messages|system_instructions|tool\\.call\\.(arguments|result)).*")
+          - delete_matching_keys(attributes, "^(tool\\.(args|arguments|input|output|result)|llm\\.(prompt|completion)).*")   # VERIFY kagent attr names
+      - context: spanevent
+        statements:
+          - delete_matching_keys(attributes, "^gen_ai\\..*(content|message|arguments|result).*")
+  filter/opted-in-only:
+    error_mode: ignore
+    traces:
+      span:
+        - 'resource.attributes["capture_content"] != "true"'
+  filter/audit-only:
+    error_mode: ignore
+    logs:
+      log_record:
+        - 'attributes["audit"] != "true" and not IsMatch(resource.attributes["service.name"], "^(approval-service|intake|credential-broker)$")'
+
+exporters:
+  otlp/tempo-ops:
+    endpoint: tempo-distributor.observability.svc.cluster.local:4317
+    tls: { insecure: true }
+    headers: { X-Scope-OrgID: ops }
+  otlp/tempo-content:
+    endpoint: tempo-distributor.observability.svc.cluster.local:4317
+    tls: { insecure: true }
+    headers: { X-Scope-OrgID: content }
+  otlphttp/loki-ops:
+    endpoint: http://loki-gateway.observability.svc.cluster.local/otlp
+    headers: { X-Scope-OrgID: ops }
+  otlphttp/loki-audit:
+    endpoint: http://loki-gateway.observability.svc.cluster.local/otlp
+    headers: { X-Scope-OrgID: audit }
+  awss3/audit-worm:
+    s3uploader:
+      region: us-east-1                       # TODO(aws)
+      s3_bucket: example-agent-audit-worm     # Object Lock: COMPLIANCE, 395 days (13 months)
+      s3_prefix: audit
+      s3_partition_format: 'year=%Y/month=%m/day=%d/hour=%H'
+    marshaler: otlp_json
+  otlphttp/mimir:
+    endpoint: http://mimir-distributor.observability.svc.cluster.local:8080/otlp
+    headers: { X-Scope-OrgID: ops }
+
+service:
+  pipelines:
+    traces/ops:
+      receivers: [otlp]
+      processors: [memory_limiter, k8sattributes, transform/redact, batch]
+      exporters: [otlp/tempo-ops]
+    traces/content:
+      receivers: [otlp]
+      processors: [memory_limiter, k8sattributes, filter/opted-in-only, batch]
+      exporters: [otlp/tempo-content]
+    logs/ops:
+      receivers: [otlp]
+      processors: [memory_limiter, k8sattributes, batch]
+      exporters: [otlphttp/loki-ops]
+    logs/audit:
+      receivers: [otlp]
+      processors: [memory_limiter, k8sattributes, filter/audit-only, batch]
+      exporters: [otlphttp/loki-audit, awss3/audit-worm]
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/mimir]

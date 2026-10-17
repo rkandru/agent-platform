@@ -1,0 +1,185 @@
+# Egress: what an agent may call (D5, D13, D21, D23, D29, D30).
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: llm, namespace: agentgateway-system }
+spec:
+  parentRefs: [{ name: agw-egress }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /llm } }]
+      filters:
+        - type: URLRewrite
+          urlRewrite: { path: { type: ReplacePrefixMatch, replacePrefixMatch: / } }
+      backendRefs: [{ group: agentgateway.dev, kind: AgentgatewayBackend, name: litellm }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: mcp-grafana, namespace: agentgateway-system }
+spec:
+  parentRefs: [{ name: agw-egress }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /mcp/grafana } }]
+      backendRefs: [{ group: agentgateway.dev, kind: AgentgatewayBackend, name: mcp-grafana }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: mcp-atlassian, namespace: agentgateway-system }
+spec:
+  parentRefs: [{ name: agw-egress }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /mcp/atlassian } }]
+      backendRefs: [{ group: agentgateway.dev, kind: AgentgatewayBackend, name: mcp-atlassian }]
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: { name: a2a, namespace: agentgateway-system }
+spec:
+  parentRefs: [{ name: agw-egress }]
+  rules:
+    - matches: [{ path: { type: PathPrefix, value: /api/a2a } }]
+      backendRefs: [{ group: agentgateway.dev, kind: AgentgatewayBackend, name: kagent-a2a }]
+---
+# Only workloads in agent namespaces may use the egress gateway at all.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: egress-agents-only, namespace: agentgateway-system }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: agw-egress }]
+  traffic:
+    authorization:
+      action: Require
+      policy:
+        matchExpressions:
+          # Agents live in team-* namespaces; the kagent controller (ns kagent) only discovers tools (tools/list),
+          # which the generated per-backend mcp.authorization policies restrict further.
+          - 'source.unverifiedWorkload.namespace.startsWith("team-") || source.unverifiedWorkload.namespace == "kagent"'   # SPIKE(workload-identity), see README
+---
+# User identity is optional on egress (autonomous runs carry none) but must be valid when present.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: egress-jwt, namespace: agentgateway-system }
+spec:
+  targetRefs:
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: mcp-grafana }
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: mcp-atlassian }
+    - { group: gateway.networking.k8s.io, kind: HTTPRoute, name: a2a }
+  traffic:
+    jwtAuthentication:
+      mode: Optional
+      providers:
+        - issuer: https://keycloak.example.com/realms/platform
+          jwks:
+            remote: { url: "https://keycloak.example.com/realms/platform/protocol/openid-connect/certs" }
+---
+# LLM path: the agent never holds a LiteLLM key (D30). Strip what it sends, stamp agent identity.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: llm-agent-identity, namespace: agentgateway-system }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: llm }]
+  traffic:
+    transformation:
+      request:
+        remove: [authorization, x-agent-id]
+        set:
+          - name: x-agent-id
+            value: 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount'
+    rateLimit:
+      local:
+        - requests: 120
+          unit: Minutes
+          key: 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount'
+---
+# Vendor MCP: link check + approval grants enforced at the gateway, because Atlassian can't verify them (D29, D45).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: atlassian-ext-authz, namespace: agentgateway-system }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: mcp-atlassian }]
+  backend:
+    extAuth:
+      backendRef: { name: approval-service, namespace: agent-platform, port: 9001 }
+      forwardBody: { maxSize: 65536 }        # the approval service hashes tool + arguments
+      grpc:
+        contextExtensions:
+          checks: "link,approval-grant"        # approval-service asks the broker for link status
+        requestMetadata:
+          user: jwt.sub
+          agent: 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount'
+---
+# MCP guardrails on tool calls and tool results (D23). The adapter translates to NeMo Guardrails /v1/checks.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: mcp-guardrails, namespace: agentgateway-system }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: Gateway, name: agw-egress }]
+  backend:
+    mcp:
+      guardrails:
+        processors:
+          - remote:
+              backendRef: { name: guardrails-adapter, namespace: guardrails, port: 4317 }
+              failureMode: FailClosed
+              metadata:
+                agent: 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount'
+              disallowedRequestHeaders: [authorization]
+            methods:
+              tools/call: Full
+---
+# A2A content inspection (D47, ADR 0016). The generated edge allowlist decides whether A may call B;
+# this decides whether what A says may pass. Requests are buffered (the task brief is short by design);
+# responses are checked as they stream. Phase 1: deterministic rules only. Phase 3 adds the semantic
+# judge on cross-team edges, under the runtime rules in ADR 0018.
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: a2a-inspection, namespace: agentgateway-system }
+spec:
+  targetRefs: [{ group: gateway.networking.k8s.io, kind: HTTPRoute, name: a2a }]
+  traffic:
+    extProc:
+      conditional:
+        # Cross-team edge: the callee (/api/a2a/<namespace>/<agent>) is outside the caller's namespace.
+        - condition: '!request.path.startsWith("/api/a2a/" + source.unverifiedWorkload.namespace + "/")'
+          policy:
+            backendRef: { name: guardrails-adapter, namespace: guardrails, port: 9002 }   # Envoy ext_proc gRPC
+            failureMode: FailClosed
+            processingOptions: { requestBodyMode: Buffered, responseBodyMode: FullDuplexStreamed }
+            metadataContext:
+              platform.example.com:
+                caller: 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount'
+                callee: 'request.path'
+                edge: '"cross-team"'
+        # Same-team edge (fallback).
+        - policy:
+            backendRef: { name: guardrails-adapter, namespace: guardrails, port: 9002 }
+            failureMode: FailClosed
+            processingOptions: { requestBodyMode: Buffered, responseBodyMode: FullDuplexStreamed }
+            metadataContext:
+              platform.example.com:
+                caller: 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount'
+                callee: 'request.path'
+                edge: '"same-team"'
+---
+# Telemetry: access logs + traces to the OTel Collector (audit + ops tenants, D32).
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata: { name: egress-telemetry, namespace: agentgateway-system }
+spec:
+  targetRefs:
+    - { group: gateway.networking.k8s.io, kind: Gateway, name: agw-egress }
+    - { group: gateway.networking.k8s.io, kind: Gateway, name: agw-inbound }
+  frontend:
+    tracing:
+      backendRef: { name: otel-collector, namespace: observability, port: 4317 }
+      protocol: GRPC
+      randomSampling: "1.0"
+    accessLog:
+      otlp:
+        backendRef: { name: otel-collector, namespace: observability, port: 4317 }
+      attributes:
+        add:
+          - { name: agent.id, expression: 'source.unverifiedWorkload.namespace + "/" + source.unverifiedWorkload.serviceAccount' }
+          - { name: user.sub, expression: jwt.sub }
+          - { name: mcp.tool, expression: mcp.tool.name }
+          - { name: audit, expression: '"true"' }
+# Per-agent MCP tool allowlists (mcp.authorization) and A2A edge allowlists are rendered into
+# generated/ by tools/render_agent_policies.py from Agent CR labels.

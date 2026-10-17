@@ -1,0 +1,45 @@
+# kagent 0.10.3 Helm values for prod chat/ops agents (D24). Field names checked against helm/kagent/values.yaml@v0.10.3.
+controller:
+  auth:
+    # JWTs are verified by agw-inbound before reaching the controller (D25); `trusted-proxy` itself does NOT verify
+    # signatures, so networkpolicy-controller.yaml must make agentgateway (and the UI) the only callers of :8083.
+    mode: trusted-proxy
+    userIdClaim: sub
+  agentDeployment:
+    serviceAccountName: ""          # keep per-agent ServiceAccounts: each is a Keycloak client (D11)
+    podLabels:
+      platform.example.com/agent: "true"
+
+database:
+  postgres:
+    urlFile: /etc/kagent/db/url      # TODO(vault): mount from an ExternalSecret; external Postgres, not bundled
+    vectorEnabled: false             # long-term memory off in v1 (D31)
+    sessionRetentionDays: 90         # built-in idle-session hard delete replaces a custom cleanup job (D31)
+    bundled:
+      enabled: false
+
+ui:
+  externalUrl: https://agents.example.com
+  auth:
+    ssoRedirectPath: /oauth2/start   # existing oauth2-proxy (Keycloak) in front of agw-inbound
+
+# Built-in demo agents bypass our labels/ACLs; re-create governed equivalents under gitops/teams/ instead.
+k8s-agent:
+  enabled: false
+kgateway-agent:
+  enabled: false
+
+otel:
+  tracing:
+    enabled: true
+    exporter:
+      otlp:
+        endpoint: otel-collector.observability.svc.cluster.local:4317
+        protocol: grpc
+        insecure: true
+  logging:
+    enabled: true
+    exporter:
+      otlp:
+        endpoint: otel-collector.observability.svc.cluster.local:4317
+        insecure: true

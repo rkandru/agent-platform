@@ -1,0 +1,24 @@
+# Run: kyverno test gitops/platform/kyverno/tests
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Test
+metadata:
+  name: agent-platform-policies
+policies:
+  - ../policies/require-agent-metadata.yaml
+  - ../policies/restrict-model-and-tool-endpoints.yaml
+  - ../policies/require-gvisor-sandbox.yaml
+resources:
+  - resources/agents.yaml
+  - resources/modelconfigs.yaml
+  - resources/remotemcpservers.yaml
+  - resources/pods.yaml
+variables: values.yaml
+results:
+  - { policy: require-agent-metadata, rule: required-labels-and-annotations, resources: [good-agent], kind: Agent, result: pass }
+  - { policy: require-agent-metadata, rule: required-labels-and-annotations, resources: [unlabelled-agent], kind: Agent, result: fail }
+  - { policy: restrict-model-and-tool-endpoints, rule: modelconfig-through-gateway, resources: [via-gateway], kind: ModelConfig, result: pass }
+  - { policy: restrict-model-and-tool-endpoints, rule: modelconfig-through-gateway, resources: [direct-to-provider], kind: ModelConfig, result: fail }
+  - { policy: restrict-model-and-tool-endpoints, rule: remotemcpserver-through-gateway, resources: [mcp-via-gateway], kind: RemoteMCPServer, result: pass }
+  - { policy: restrict-model-and-tool-endpoints, rule: remotemcpserver-through-gateway, resources: [mcp-direct], kind: RemoteMCPServer, result: fail }
+  - { policy: require-gvisor-sandbox, rule: runtimeclass-gvisor, resources: [sandboxed], kind: Pod, result: pass }
+  - { policy: require-gvisor-sandbox, rule: runtimeclass-gvisor, resources: [unsandboxed], kind: Pod, result: fail }
